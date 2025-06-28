@@ -1,0 +1,127 @@
+﻿@page
+@model ChatModel
+@{
+    ViewData["Title"] = "Chat";
+}
+
+<link rel="stylesheet" href="~/css/chat.css" />
+
+<div class="container-fluid">
+    <!-- Main Chat Interface -->
+    <div id="chatInterface" class="chat-interface">
+        <div class="row no-gutters">
+            <!-- Sidebar -->
+            <div class="col-md-3 sidebar">
+                <div class="sidebar-header">
+                    <h4>Chat Rooms</h4>
+                    <div class="user-info">
+                        <span id="currentUsername" class="username-display"></span>
+                        <button id="logoutBtn" class="btn btn-sm btn-outline-secondary">Logout</button>
+                    </div>
+                </div>
+
+                <div id="connectionStatus" class="connection-status-small">Connecting...</div>
+
+                <div class="room-list">
+                    <div class="room-item" data-room="general" onclick="chatClient.switchToRoomFromSidebar('general')">
+                        <div class="room-icon">💬</div>
+                        <div class="room-details">
+                            <div class="room-name">General Chat</div>
+                            <div class="room-count"><span id="count-general">0</span> users</div>
+                        </div>
+                        <div class="room-actions" onclick="event.stopPropagation()">
+                            <button class="btn-join" onclick="chatClient.joinRoom('general')">Join</button>
+                            <button class="btn-leave" onclick="chatClient.leaveRoom('general')" style="display: none;">Leave</button>
+                        </div>
+                    </div>
+
+                    <div class="room-item" data-room="family" onclick="chatClient.switchToRoomFromSidebar('family')">
+                        <div class="room-icon">👨‍👩‍👧‍👦</div>
+                        <div class="room-details">
+                            <div class="room-name">Family</div>
+                            <div class="room-count"><span id="count-family">0</span> users</div>
+                        </div>
+                        <div class="room-actions" onclick="event.stopPropagation()">
+                            <button class="btn-join" onclick="chatClient.joinRoom('family')">Join</button>
+                            <button class="btn-leave" onclick="chatClient.leaveRoom('family')" style="display: none;">Leave</button>
+                        </div>
+                    </div>
+
+                    <div class="room-item" data-room="friends" onclick="chatClient.switchToRoomFromSidebar('friends')">
+                        <div class="room-icon">👫</div>
+                        <div class="room-details">
+                            <div class="room-name">Friends</div>
+                            <div class="room-count"><span id="count-friends">0</span> users</div>
+                        </div>
+                        <div class="room-actions" onclick="event.stopPropagation()">
+                            <button class="btn-join" onclick="chatClient.joinRoom('friends')">Join</button>
+                            <button class="btn-leave" onclick="chatClient.leaveRoom('friends')" style="display: none;">Leave</button>
+                        </div>
+                    </div>
+
+                    <div class="room-item" data-room="gaming" onclick="chatClient.switchToRoomFromSidebar('gaming')">
+                        <div class="room-icon">🎮</div>
+                        <div class="room-details">
+                            <div class="room-name">Gaming</div>
+                            <div class="room-count"><span id="count-gaming">0</span> users</div>
+                        </div>
+                        <div class="room-actions" onclick="event.stopPropagation()">
+                            <button class="btn-join" onclick="chatClient.joinRoom('gaming')">Join</button>
+                            <button class="btn-leave" onclick="chatClient.leaveRoom('gaming')" style="display: none;">Leave</button>
+                        </div>
+                    </div>
+
+                    <div class="room-item" data-room="tech" onclick="chatClient.switchToRoomFromSidebar('tech')">
+                        <div class="room-icon">💻</div>
+                        <div class="room-details">
+                            <div class="room-name">Tech Talk</div>
+                            <div class="room-count"><span id="count-tech">0</span> users</div>
+                        </div>
+                        <div class="room-actions" onclick="event.stopPropagation()">
+                            <button class="btn-join" onclick="chatClient.joinRoom('tech')">Join</button>
+                            <button class="btn-leave" onclick="chatClient.leaveRoom('tech')" style="display: none;">Leave</button>
+                        </div>
+                    </div>
+
+                    <div class="room-item" data-room="random" onclick="chatClient.switchToRoomFromSidebar('random')">
+                        <div class="room-icon">🎲</div>
+                        <div class="room-details">
+                            <div class="room-name">Random</div>
+                            <div class="room-count"><span id="count-random">0</span> users</div>
+                        </div>
+                        <div class="room-actions" onclick="event.stopPropagation()">
+                            <button class="btn-join" onclick="chatClient.joinRoom('random')">Join</button>
+                            <button class="btn-leave" onclick="chatClient.leaveRoom('random')" style="display: none;">Leave</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Main Chat Area -->
+            <div class="col-md-9 chat-main">
+                <div class="chat-header">
+                    <h3 id="currentRoomDisplay">Select a room to start chatting</h3>
+                    <div class="room-tabs" id="roomTabs">
+                        <!-- Active room tabs will appear here -->
+                    </div>
+                </div>
+
+                <div class="chat-messages">
+                    <ul id="messagesList"></ul>
+                </div>
+
+                <div class="chat-input">
+                    <div class="input-group">
+                        <input type="text" id="messageInput" class="form-control" placeholder="Type a message..." maxlength="500" disabled />
+                        <div class="input-group-append">
+                            <button id="sendButton" class="btn btn-primary" disabled>Send</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/7.0.0/signalr.min.js"></script>
+<script src="~/js/chat.js"></script>
