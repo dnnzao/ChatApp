@@ -4,30 +4,26 @@
     ViewData["Title"] = "Welcome to Multi-Room Chat";
 }
 
-<link rel="stylesheet" href="~/css/chat.css" />
+<!-- Login Screen -->
+<div id="loginScreen" class="login-container">
+    <div class="login-card">
+        <h2>Welcome to Multi-Room Chat</h2>
+        <div id="connectionStatus" class="connection-status">Connecting...</div>
 
-<div class="container-fluid">
-    <!-- Login Screen -->
-    <div id="loginScreen" class="login-container">
-        <div class="login-card">
-            <h2>Welcome to Multi-Room Chat</h2>
-            <div id="connectionStatus" class="connection-status">Connecting...</div>
-
-            <div class="login-form">
-                <div class="form-group">
-                    <label for="usernameInput">Choose your username:</label>
-                    <input type="text" id="usernameInput" class="form-control" placeholder="Enter username (3-20 chars)" maxlength="20" />
-                    <div id="usernameStatus" class="username-status"></div>
-                </div>
-
-                <button id="reserveUsernameBtn" class="btn btn-primary" disabled>
-                    Enter Chat
-                </button>
+        <div class="login-form">
+            <div class="form-group">
+                <label for="usernameInput">Choose your username:</label>
+                <input type="text" id="usernameInput" class="form-control" placeholder="Enter username (3-20 chars)" maxlength="20" />
+                <div id="usernameStatus" class="username-status"></div>
             </div>
 
-            <div class="login-footer">
-                <p>Enter a unique username to join the chat rooms!</p>
-            </div>
+            <button id="reserveUsernameBtn" class="btn btn-primary" disabled>
+                Enter Chat
+            </button>
+        </div>
+
+        <div class="login-footer">
+            <p>Enter a unique username to join the chat rooms!</p>
         </div>
     </div>
 </div>

@@ -123,18 +123,26 @@ namespace ChatApp.Hubs {
                 await Clients.Caller.SendAsync("Error", "An error occurred while sending the message.");
             }
         }
+        public override async Task OnConnectedAsync() {
+            var ipAddress = Context.GetHttpContext()?.Connection?.RemoteIpAddress?.ToString() ?? "unknown";
+            var chatService = _chatService as ChatService;
 
-        public async Task CheckUsernameAvailability(string username) {
-            try {
-                var isAvailable = _chatService.IsUsernameAvailable(username) && _chatService.IsValidUsername(username);
-                await Clients.Caller.SendAsync("UsernameAvailability", username, isAvailable);
-            } catch (Exception ex) {
-                _logger.LogError(ex, "Error checking username availability for {Username}", username);
+            if (chatService?.CanConnect(ipAddress, Context.ConnectionId) == false) {
+                _logger.LogWarning("Connection rejected for IP: {IP}", ipAddress);
+                Context.Abort();
+                return;
             }
+
+            _logger.LogInformation("New connection from IP: {IP}, Connection: {ConnectionId}", ipAddress, Context.ConnectionId);
+            await base.OnConnectedAsync();
         }
 
         public override async Task OnDisconnectedAsync(Exception? exception) {
             try {
+                var ipAddress = Context.GetHttpContext()?.Connection?.RemoteIpAddress?.ToString() ?? "unknown";
+                var chatService = _chatService as ChatService;
+                chatService?.RemoveConnection(ipAddress);
+
                 var user = _chatService.GetUser(Context.ConnectionId);
 
                 if (user != null) {
@@ -153,6 +161,21 @@ namespace ChatApp.Hubs {
             }
 
             await base.OnDisconnectedAsync(exception);
+        }
+
+        public async Task CheckUsernameAvailability(string username) {
+            try {
+                var chatService = _chatService as ChatService;
+                if (chatService?.CheckUsernameAvailability(Context.ConnectionId, username) == false) {
+                    await Clients.Caller.SendAsync("Error", "Too many username checks. Please wait.");
+                    return;
+                }
+
+                var isAvailable = _chatService.IsUsernameAvailable(username) && _chatService.IsValidUsername(username);
+                await Clients.Caller.SendAsync("UsernameAvailability", username, isAvailable);
+            } catch (Exception ex) {
+                _logger.LogError(ex, "Error checking username availability for {Username}", username);
+            }
         }
     }
 }

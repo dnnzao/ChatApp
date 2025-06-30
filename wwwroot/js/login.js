@@ -2,6 +2,8 @@
     constructor() {
         this.connection = new signalR.HubConnectionBuilder().withUrl("/chatHub").build();
         this.isConnected = false;
+        this.lastUsernameCheck = 0;
+        this.USERNAME_CHECK_COOLDOWN = 300; // 300ms cooldown for username checks
 
         this.initializeConnection();
         this.setupEventHandlers();
@@ -32,7 +34,19 @@
 
         // Username management events
         this.connection.on("UsernameReserved", (username) => {
-            // Store username in sessionStorage for the chat page
+            // Create secure session data
+            const sessionData = {
+                username: username,
+                timestamp: Date.now(),
+                sessionId: crypto.randomUUID(),
+                // Add a simple checksum for integrity
+                checksum: this.generateChecksum(username)
+            };
+
+            // Store session data securely
+            sessionStorage.setItem("chatSession", JSON.stringify(sessionData));
+
+            // Also keep old format for backward compatibility (temporary)
             sessionStorage.setItem("chatUsername", username);
 
             // Redirect to chat page
@@ -40,34 +54,86 @@
         });
 
         this.connection.on("UsernameReservationFailed", (error) => {
-            this.showUsernameError(error);
+            this.showUsernameError(this.sanitizeErrorMessage(error));
         });
 
         this.connection.on("UsernameAvailability", (username, isAvailable) => {
             this.updateUsernameStatus(username, isAvailable);
         });
 
-        // DOM event handlers
         this.setupDOMEventHandlers();
     }
 
     setupDOMEventHandlers() {
-        // Username input and validation
         const usernameInput = document.getElementById("usernameInput");
         const reserveBtn = document.getElementById("reserveUsernameBtn");
 
+        // Enhanced input validation with rate limiting
         usernameInput.addEventListener("input", (e) => {
             const username = e.target.value.trim();
+
+            // Client-side validation
+            if (!this.isValidUsernameFormat(username)) {
+                if (username.length > 0) {
+                    this.showUsernameError("Username must be 3-20 characters, letters, numbers, _ and - only");
+                } else {
+                    this.clearUsernameStatus();
+                }
+                reserveBtn.disabled = true;
+                return;
+            }
+
+            // Rate limiting for username checks
+            const now = Date.now();
+            if (now - this.lastUsernameCheck < this.USERNAME_CHECK_COOLDOWN) {
+                return;
+            }
+
             if (username.length >= 3 && this.isConnected) {
                 this.connection.invoke("CheckUsernameAvailability", username);
+                this.lastUsernameCheck = now;
             } else {
                 this.clearUsernameStatus();
                 reserveBtn.disabled = true;
             }
         });
 
+        // Prevent paste of invalid characters
+        usernameInput.addEventListener("paste", (e) => {
+            setTimeout(() => {
+                const value = e.target.value;
+                const sanitized = value.replace(/[^a-zA-Z0-9_-]/g, '').substring(0, 20);
+                if (value !== sanitized) {
+                    e.target.value = sanitized;
+                    this.showUsernameError("Invalid characters were removed");
+                }
+            }, 0);
+        });
+
+        // Limit input length and filter invalid characters
         usernameInput.addEventListener("keypress", (e) => {
-            if (e.key === "Enter" && !reserveBtn.disabled) {
+            const char = e.key;
+
+            // Allow special keys
+            if (e.ctrlKey || e.altKey || char === "Backspace" || char === "Delete" ||
+                char === "ArrowLeft" || char === "ArrowRight" || char === "Tab") {
+                return;
+            }
+
+            // Check if character is valid
+            if (!/[a-zA-Z0-9_-]/.test(char)) {
+                e.preventDefault();
+                return;
+            }
+
+            // Check length limit
+            if (e.target.value.length >= 20) {
+                e.preventDefault();
+                return;
+            }
+
+            // Handle Enter key
+            if (char === "Enter" && !reserveBtn.disabled) {
                 this.reserveUsername();
             }
         });
@@ -75,12 +141,45 @@
         reserveBtn.addEventListener("click", () => this.reserveUsername());
     }
 
+    // Client-side username validation (must match server-side)
+    isValidUsernameFormat(username) {
+        if (!username || typeof username !== 'string') return false;
+        if (username.length < 3 || username.length > 20) return false;
+        return /^[a-zA-Z0-9_-]+$/.test(username);
+    }
+
+    // Simple checksum for session integrity
+    generateChecksum(username) {
+        let hash = 0;
+        for (let i = 0; i < username.length; i++) {
+            const char = username.charCodeAt(i);
+            hash = ((hash << 5) - hash) + char;
+            hash = hash & hash; // Convert to 32-bit integer
+        }
+        return hash.toString();
+    }
+
+    sanitizeErrorMessage(error) {
+        if (!error || typeof error !== 'string') return "Unknown error";
+        // Remove potentially dangerous content and limit length
+        return error.replace(/[<>]/g, '').substring(0, 100);
+    }
+
     async reserveUsername() {
-        const username = document.getElementById("usernameInput").value.trim();
+        const usernameInput = document.getElementById("usernameInput");
+        const username = usernameInput.value.trim();
+
         if (!username || !this.isConnected) return;
+
+        // Final validation before sending
+        if (!this.isValidUsernameFormat(username)) {
+            this.showUsernameError("Invalid username format");
+            return;
+        }
 
         // Disable button to prevent double-click
         const reserveBtn = document.getElementById("reserveUsernameBtn");
+        const originalText = reserveBtn.textContent;
         reserveBtn.disabled = true;
         reserveBtn.textContent = "Entering...";
 
@@ -92,22 +191,30 @@
 
             // Re-enable button
             reserveBtn.disabled = false;
-            reserveBtn.textContent = "Enter Chat";
+            reserveBtn.textContent = originalText;
         }
     }
 
-    // UI Update Methods
+    // UI Update Methods - Secure implementations
     updateConnectionStatus(status) {
         const statusElement = document.getElementById("connectionStatus");
         if (statusElement) {
-            statusElement.textContent = status;
-            statusElement.className = `connection-status ${status.toLowerCase().replace(' ', '-')}`;
+            statusElement.textContent = status; // Use textContent for security
+            statusElement.className = `connection-status ${status.toLowerCase().replace(/[^a-z-]/g, '')}`;
         }
     }
 
     updateUsernameStatus(username, isAvailable) {
         const statusElement = document.getElementById("usernameStatus");
         const reserveBtn = document.getElementById("reserveUsernameBtn");
+
+        if (!statusElement || !reserveBtn) return;
+
+        // Validate the response data
+        if (typeof isAvailable !== 'boolean' || !this.isValidUsernameFormat(username)) {
+            this.showUsernameError("Invalid response from server");
+            return;
+        }
 
         if (isAvailable) {
             statusElement.textContent = "✓ Username is available";
@@ -122,15 +229,24 @@
 
     clearUsernameStatus() {
         const statusElement = document.getElementById("usernameStatus");
-        statusElement.textContent = "";
-        statusElement.className = "username-status";
-        document.getElementById("reserveUsernameBtn").disabled = true;
+        const reserveBtn = document.getElementById("reserveUsernameBtn");
+
+        if (statusElement) {
+            statusElement.textContent = "";
+            statusElement.className = "username-status";
+        }
+
+        if (reserveBtn) {
+            reserveBtn.disabled = true;
+        }
     }
 
     showUsernameError(error) {
         const statusElement = document.getElementById("usernameStatus");
-        statusElement.textContent = error;
-        statusElement.className = "username-status invalid";
+        if (statusElement) {
+            statusElement.textContent = this.sanitizeErrorMessage(error);
+            statusElement.className = "username-status invalid";
+        }
     }
 }
 

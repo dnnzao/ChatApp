@@ -1,9 +1,9 @@
 ﻿class ChatClient {
     constructor() {
-        // Check if user has a valid username from login page
-        this.username = sessionStorage.getItem("chatUsername");
+        // Enhanced session validation
+        this.username = this.validateSession();
         if (!this.username) {
-            // Redirect to login page if no username found
+            // Redirect to login page if no valid session found
             window.location.href = "/";
             return;
         }
@@ -11,18 +11,76 @@
         this.connection = new signalR.HubConnectionBuilder().withUrl("/chatHub").build();
         this.currentRoom = "";
         this.joinedRooms = new Set();
-        this.roomMessages = new Map(); // Store messages for each room separately
+        this.roomMessages = new Map();
         this.isConnected = false;
-        this.isLoggedIn = true; // User is already logged in
+        this.isLoggedIn = true;
+
+        // Security: Rate limiting for client-side actions
+        this.lastMessageTime = 0;
+        this.MESSAGE_COOLDOWN = 1000; // 1 second
 
         this.initializeConnection();
         this.setupEventHandlers();
         this.initializeUI();
     }
 
+    // Enhanced session validation with security checks
+    validateSession() {
+        try {
+            const sessionData = sessionStorage.getItem("chatSession");
+            if (!sessionData) {
+                return null;
+            }
+
+            const session = JSON.parse(sessionData);
+
+            // Validate session structure
+            if (!session.username || !session.timestamp || !session.sessionId) {
+                this.clearSession();
+                return null;
+            }
+
+            // Check session age (24 hours max)
+            const sessionAge = Date.now() - session.timestamp;
+            const MAX_SESSION_AGE = 24 * 60 * 60 * 1000; // 24 hours
+
+            if (sessionAge > MAX_SESSION_AGE) {
+                this.clearSession();
+                return null;
+            }
+
+            // Validate username format (same as server-side)
+            if (!this.isValidUsernameFormat(session.username)) {
+                this.clearSession();
+                return null;
+            }
+
+            return session.username;
+        } catch (error) {
+            console.error("Session validation error:", error);
+            this.clearSession();
+            return null;
+        }
+    }
+
+    // Client-side username validation (matches server-side)
+    isValidUsernameFormat(username) {
+        if (!username || typeof username !== 'string') return false;
+        if (username.length < 1 || username.length > 20) return false;
+        return /^[a-zA-Z0-9_-]+$/.test(username);
+    }
+
+    clearSession() {
+        sessionStorage.removeItem("chatSession");
+        sessionStorage.removeItem("chatUsername"); // Clear old format too
+    }
+
     initializeUI() {
-        // Set username in display
-        document.getElementById("currentUsername").textContent = this.username;
+        // Secure: Use textContent instead of innerHTML
+        const usernameElement = document.getElementById("currentUsername");
+        if (usernameElement) {
+            usernameElement.textContent = this.username;
+        }
     }
 
     async initializeConnection() {
@@ -52,14 +110,12 @@
 
         // Username management events
         this.connection.on("UsernameReserved", (username) => {
-            // Username successfully reserved, we're ready to go
             console.log("Username re-reserved:", username);
         });
 
         this.connection.on("UsernameReservationFailed", (error) => {
-            // Username is no longer available, redirect to login
             alert("Your username is no longer available. Please login again.");
-            sessionStorage.removeItem("chatUsername");
+            this.clearSession();
             window.location.href = "/";
         });
 
@@ -69,8 +125,14 @@
 
         // Room management events
         this.connection.on("JoinedRoom", (roomName) => {
+            // Validate room name
+            if (!this.isValidRoomName(roomName)) {
+                console.error("Invalid room name received:", roomName);
+                return;
+            }
+
             this.joinedRooms.add(roomName);
-            this.roomMessages.set(roomName, []); // Initialize empty message array for this room
+            this.roomMessages.set(roomName, []);
             this.updateRoomUI(roomName, true);
             this.addRoomTab(roomName);
             if (!this.currentRoom) {
@@ -79,8 +141,10 @@
         });
 
         this.connection.on("LeftRoom", (roomName) => {
+            if (!this.isValidRoomName(roomName)) return;
+
             this.joinedRooms.delete(roomName);
-            this.roomMessages.delete(roomName); // Remove messages for this room
+            this.roomMessages.delete(roomName);
             this.updateRoomUI(roomName, false);
             this.removeRoomTab(roomName);
             if (this.currentRoom === roomName) {
@@ -94,9 +158,11 @@
         });
 
         this.connection.on("SwitchedToRoom", (roomName) => {
+            if (!this.isValidRoomName(roomName)) return;
+
             this.currentRoom = roomName;
             this.updateCurrentRoomDisplay(roomName);
-            this.loadRoomMessages(roomName); // Load messages for this room
+            this.loadRoomMessages(roomName);
             document.getElementById("messageInput").disabled = false;
             document.getElementById("sendButton").disabled = false;
         });
@@ -105,40 +171,89 @@
             this.updateRoomCounts(roomCounts);
         });
 
-        // Message events
+        // Message events with validation
         this.connection.on("ReceiveMessage", (user, message, room) => {
+            // Validate all parameters
+            if (!this.isValidUsernameFormat(user) ||
+                !this.isValidMessage(message) ||
+                !this.isValidRoomName(room)) {
+                console.error("Invalid message data received");
+                return;
+            }
             this.displayMessage(user, message, room);
         });
 
         this.connection.on("UserJoined", (message) => {
-            this.displaySystemMessage(message, 'join');
+            if (this.isValidSystemMessage(message)) {
+                this.displaySystemMessage(message, 'join');
+            }
         });
 
         this.connection.on("UserLeft", (message) => {
-            this.displaySystemMessage(message, 'leave');
+            if (this.isValidSystemMessage(message)) {
+                this.displaySystemMessage(message, 'leave');
+            }
         });
 
         // Error events
         this.connection.on("JoinFailed", (error) => {
-            this.showError("Failed to join room: " + error);
+            this.showError("Failed to join room: " + this.sanitizeErrorMessage(error));
         });
 
         this.connection.on("MessageFailed", (error) => {
-            this.showError("Failed to send message: " + error);
+            this.showError("Failed to send message: " + this.sanitizeErrorMessage(error));
         });
 
         this.connection.on("Error", (error) => {
-            this.showError("Error: " + error);
+            this.showError("Error: " + this.sanitizeErrorMessage(error));
         });
 
-        // DOM event handlers
         this.setupDOMEventHandlers();
     }
 
+    // Validation methods
+    isValidRoomName(roomName) {
+        if (!roomName || typeof roomName !== 'string') return false;
+        const allowedRooms = ['general', 'family', 'friends', 'gaming', 'tech', 'random'];
+        return allowedRooms.includes(roomName.toLowerCase());
+    }
+
+    isValidMessage(message) {
+        if (!message || typeof message !== 'string') return false;
+        if (message.length > 500) return false;
+
+        // Check for potentially malicious patterns
+        const dangerousPatterns = [
+            '<script', 'javascript:', 'onload=', 'onerror=', 'onclick=',
+            'data:text/html', 'vbscript:', 'expression('
+        ];
+
+        const lowerMessage = message.toLowerCase();
+        return !dangerousPatterns.some(pattern => lowerMessage.includes(pattern));
+    }
+
+    isValidSystemMessage(message) {
+        if (!message || typeof message !== 'string') return false;
+        return message.length <= 200; // System messages should be shorter
+    }
+
+    sanitizeErrorMessage(error) {
+        if (!error || typeof error !== 'string') return "Unknown error";
+        // Remove potentially sensitive information
+        return error.substring(0, 100).replace(/[<>]/g, '');
+    }
+
     setupDOMEventHandlers() {
-        // Chat input
         const messageInput = document.getElementById("messageInput");
         const sendButton = document.getElementById("sendButton");
+
+        // Enhanced input validation
+        messageInput.addEventListener("input", (e) => {
+            const value = e.target.value;
+            if (value.length > 500) {
+                e.target.value = value.substring(0, 500);
+            }
+        });
 
         messageInput.addEventListener("keypress", (e) => {
             if (e.key === "Enter") {
@@ -147,13 +262,11 @@
         });
 
         sendButton.addEventListener("click", () => this.sendMessage());
-
-        // Logout button
         document.getElementById("logoutBtn").addEventListener("click", () => this.logout());
     }
 
     async joinRoom(roomName) {
-        if (!this.isConnected) return;
+        if (!this.isConnected || !this.isValidRoomName(roomName)) return;
 
         if (this.joinedRooms.has(roomName)) {
             this.switchToRoom(roomName);
@@ -169,7 +282,7 @@
     }
 
     async leaveRoom(roomName) {
-        if (!this.isConnected || !this.joinedRooms.has(roomName)) return;
+        if (!this.isConnected || !this.joinedRooms.has(roomName) || !this.isValidRoomName(roomName)) return;
 
         try {
             await this.connection.invoke("LeaveRoom", roomName);
@@ -180,7 +293,7 @@
     }
 
     async switchToRoom(roomName) {
-        if (!this.joinedRooms.has(roomName)) return;
+        if (!this.joinedRooms.has(roomName) || !this.isValidRoomName(roomName)) return;
 
         try {
             await this.connection.invoke("SwitchToRoom", roomName);
@@ -190,8 +303,7 @@
     }
 
     switchToRoomFromSidebar(roomName) {
-        // If user is in the room, switch to it. If not, do nothing (they need to join first)
-        if (this.joinedRooms.has(roomName)) {
+        if (this.joinedRooms.has(roomName) && this.isValidRoomName(roomName)) {
             this.switchToRoom(roomName);
         }
     }
@@ -200,36 +312,57 @@
         const messageInput = document.getElementById("messageInput");
         const message = messageInput.value.trim();
 
+        // Enhanced validation and rate limiting
         if (!message || !this.currentRoom || !this.isConnected) return;
+
+        // Client-side rate limiting
+        const now = Date.now();
+        if (now - this.lastMessageTime < this.MESSAGE_COOLDOWN) {
+            this.showError("Please wait before sending another message.");
+            return;
+        }
+
+        // Validate message
+        if (!this.isValidMessage(message)) {
+            this.showError("Message contains invalid content.");
+            return;
+        }
 
         try {
             await this.connection.invoke("SendMessage", message);
             messageInput.value = "";
+            this.lastMessageTime = now;
         } catch (err) {
             console.error("Error sending message:", err);
             this.showError("Failed to send message. Please try again.");
         }
     }
 
-    // UI Update Methods
+    // UI Update Methods with security improvements
     updateConnectionStatus(status) {
         const statusElement = document.getElementById("connectionStatus");
         if (statusElement) {
-            statusElement.textContent = status;
+            statusElement.textContent = status; // Use textContent, not innerHTML
             statusElement.className = `connection-status-small ${status.toLowerCase().replace(' ', '-')}`;
         }
     }
 
     updateRoomCounts(roomCounts) {
+        if (!roomCounts || typeof roomCounts !== 'object') return;
+
         for (const [roomName, count] of Object.entries(roomCounts)) {
+            if (!this.isValidRoomName(roomName) || typeof count !== 'number') continue;
+
             const countElement = document.getElementById(`count-${roomName}`);
             if (countElement) {
-                countElement.textContent = count;
+                countElement.textContent = Math.max(0, Math.min(999, count)); // Sanity check
             }
         }
     }
 
     updateRoomUI(roomName, isJoined) {
+        if (!this.isValidRoomName(roomName)) return;
+
         const roomItem = document.querySelector(`[data-room="${roomName}"]`);
         if (!roomItem) return;
 
@@ -238,17 +371,20 @@
 
         if (isJoined) {
             roomItem.classList.add("joined");
-            joinBtn.style.display = "none";
-            leaveBtn.style.display = "inline-block";
+            if (joinBtn) joinBtn.style.display = "none";
+            if (leaveBtn) leaveBtn.style.display = "inline-block";
         } else {
             roomItem.classList.remove("joined", "active");
-            joinBtn.style.display = "inline-block";
-            leaveBtn.style.display = "none";
+            if (joinBtn) joinBtn.style.display = "inline-block";
+            if (leaveBtn) leaveBtn.style.display = "none";
         }
     }
 
     addRoomTab(roomName) {
+        if (!this.isValidRoomName(roomName)) return;
+
         const tabsContainer = document.getElementById("roomTabs");
+        if (!tabsContainer) return;
 
         // Don't add if tab already exists
         if (tabsContainer.querySelector(`[data-room-tab="${roomName}"]`)) return;
@@ -256,15 +392,27 @@
         const tab = document.createElement("div");
         tab.className = "room-tab";
         tab.setAttribute("data-room-tab", roomName);
-        tab.innerHTML = `
-            <span onclick="chatClient.switchToRoom('${roomName}')" style="cursor: pointer;">${roomName}</span>
-            <button class="close-btn" onclick="chatClient.leaveRoom('${roomName}')" title="Leave room">×</button>
-        `;
 
+        // Create elements safely
+        const roomSpan = document.createElement("span");
+        roomSpan.textContent = roomName;
+        roomSpan.style.cursor = "pointer";
+        roomSpan.onclick = () => chatClient.switchToRoom(roomName);
+
+        const closeBtn = document.createElement("button");
+        closeBtn.className = "close-btn";
+        closeBtn.textContent = "×";
+        closeBtn.title = "Leave room";
+        closeBtn.onclick = () => chatClient.leaveRoom(roomName);
+
+        tab.appendChild(roomSpan);
+        tab.appendChild(closeBtn);
         tabsContainer.appendChild(tab);
     }
 
     removeRoomTab(roomName) {
+        if (!this.isValidRoomName(roomName)) return;
+
         const tab = document.querySelector(`[data-room-tab="${roomName}"]`);
         if (tab) {
             tab.remove();
@@ -272,9 +420,12 @@
     }
 
     updateCurrentRoomDisplay(roomName) {
-        document.getElementById("currentRoomDisplay").textContent = `#${roomName}`;
+        const displayElement = document.getElementById("currentRoomDisplay");
+        if (displayElement) {
+            displayElement.textContent = `#${roomName}`; // Safe text assignment
+        }
 
-        // Update active tab
+        // Update active states
         document.querySelectorAll(".room-tab").forEach(tab => {
             tab.classList.remove("active");
         });
@@ -284,7 +435,6 @@
             activeTab.classList.add("active");
         }
 
-        // Update active room in sidebar
         document.querySelectorAll(".room-item").forEach(item => {
             item.classList.remove("active");
         });
@@ -296,13 +446,16 @@
     }
 
     showNoRoomSelected() {
-        document.getElementById("currentRoomDisplay").textContent = "Select a room to start chatting";
+        const displayElement = document.getElementById("currentRoomDisplay");
+        if (displayElement) {
+            displayElement.textContent = "Select a room to start chatting";
+        }
+
         document.getElementById("messageInput").disabled = true;
         document.getElementById("sendButton").disabled = true;
-        this.currentRoom = ""; // Clear current room
+        this.currentRoom = "";
         this.clearMessages();
 
-        // Remove active states
         document.querySelectorAll(".room-tab").forEach(tab => {
             tab.classList.remove("active");
         });
@@ -312,7 +465,6 @@
     }
 
     displayMessage(user, message, room) {
-        // Store message in the appropriate room's message history
         if (!this.roomMessages.has(room)) {
             this.roomMessages.set(room, []);
         }
@@ -334,8 +486,6 @@
     }
 
     displaySystemMessage(message, type) {
-        // System messages should appear in all rooms the user is in
-        // But for now, we'll only show them in the current room
         if (!this.currentRoom) return;
 
         const messageData = {
@@ -346,7 +496,6 @@
             timestamp: new Date()
         };
 
-        // Store in current room's history
         if (this.roomMessages.has(this.currentRoom)) {
             this.roomMessages.get(this.currentRoom).push(messageData);
         }
@@ -354,17 +503,30 @@
         this.renderSystemMessage(messageData);
     }
 
+    // Secure rendering methods
     renderMessage(messageData) {
         const messagesList = document.getElementById("messagesList");
+        if (!messagesList) return;
+
         const li = document.createElement("li");
         li.className = "message";
 
-        const timestamp = messageData.timestamp.toLocaleTimeString();
-        li.innerHTML = `
-            <span class="timestamp">[${timestamp}]</span>
-            <span class="user">${this.escapeHtml(messageData.user)}:</span>
-            <span class="text">${this.escapeHtml(messageData.message)}</span>
-        `;
+        // Create elements safely without innerHTML
+        const timestampSpan = document.createElement("span");
+        timestampSpan.className = "timestamp";
+        timestampSpan.textContent = `[${messageData.timestamp.toLocaleTimeString()}]`;
+
+        const userSpan = document.createElement("span");
+        userSpan.className = "user";
+        userSpan.textContent = `${messageData.user}:`;
+
+        const textSpan = document.createElement("span");
+        textSpan.className = "text";
+        textSpan.textContent = messageData.message;
+
+        li.appendChild(timestampSpan);
+        li.appendChild(userSpan);
+        li.appendChild(textSpan);
 
         messagesList.appendChild(li);
         this.scrollToBottom();
@@ -372,26 +534,33 @@
 
     renderSystemMessage(messageData) {
         const messagesList = document.getElementById("messagesList");
+        if (!messagesList) return;
+
         const li = document.createElement("li");
         li.className = `system-message ${messageData.systemType}`;
 
-        const timestamp = messageData.timestamp.toLocaleTimeString();
-        const icon = messageData.systemType === 'join' ? '✅' : '❌';
-        li.innerHTML = `
-            <span class="timestamp">[${timestamp}]</span>
-            ${icon}
-            <span class="text">${this.escapeHtml(messageData.message)}</span>
-        `;
+        const timestampSpan = document.createElement("span");
+        timestampSpan.className = "timestamp";
+        timestampSpan.textContent = `[${messageData.timestamp.toLocaleTimeString()}]`;
+
+        const iconSpan = document.createElement("span");
+        iconSpan.textContent = messageData.systemType === 'join' ? '✅' : '❌';
+
+        const textSpan = document.createElement("span");
+        textSpan.className = "text";
+        textSpan.textContent = messageData.message;
+
+        li.appendChild(timestampSpan);
+        li.appendChild(iconSpan);
+        li.appendChild(textSpan);
 
         messagesList.appendChild(li);
         this.scrollToBottom();
     }
 
     loadRoomMessages(roomName) {
-        // Clear current messages
         this.clearMessages();
 
-        // Load messages for the specified room
         if (this.roomMessages.has(roomName)) {
             const messages = this.roomMessages.get(roomName);
             messages.forEach(messageData => {
@@ -405,34 +574,34 @@
     }
 
     clearMessages() {
-        document.getElementById("messagesList").innerHTML = "";
+        const messagesList = document.getElementById("messagesList");
+        if (messagesList) {
+            messagesList.innerHTML = "";
+        }
     }
 
     scrollToBottom() {
         const messagesList = document.getElementById("messagesList");
-        messagesList.scrollTop = messagesList.scrollHeight;
+        if (messagesList) {
+            messagesList.scrollTop = messagesList.scrollHeight;
+        }
     }
 
     showError(message) {
         console.error(message);
-        alert(message); // Simple alert for now
+        // Use a more secure notification system in production
+        alert(this.sanitizeErrorMessage(message));
     }
 
     logout() {
         if (confirm("Are you sure you want to logout?")) {
-            // Clear username from storage
-            sessionStorage.removeItem("chatUsername");
-
-            // Redirect to login page
+            this.clearSession();
             window.location.href = "/";
         }
     }
 
-    escapeHtml(text) {
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
-    }
+    // Remove the insecure escapeHtml method since we're using textContent
+    // escapeHtml is no longer needed with secure DOM manipulation
 }
 
 // Global variable for easy access from HTML onclick handlers

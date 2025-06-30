@@ -5,7 +5,7 @@ services:
       dockerfile: Dockerfile
     container_name: multi-room-chat
     ports:
-      - "5000:80"  # HTTP only - perfect for local hosting
+      - "5000:80"
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
       - ASPNETCORE_URLS=http://+:80

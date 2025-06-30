@@ -2,6 +2,7 @@
 using ChatApp.Services;
 using System.Collections.Concurrent;
 using System.Text.RegularExpressions;
+using System.Net;
 
 namespace ChatApp.Services {
     public class ChatService : IChatService {
@@ -10,9 +11,24 @@ namespace ChatApp.Services {
         private readonly ConcurrentDictionary<string, string> _globalUsernames = new(); // username -> connectionId
         private readonly ILogger<ChatService> _logger;
 
-        // Rate limiting
+        // Enhanced rate limiting with multiple tracking methods
         private readonly ConcurrentDictionary<string, DateTime> _lastMessageTime = new();
+        private readonly ConcurrentDictionary<string, DateTime> _lastMessageByConnection = new();
+        private readonly ConcurrentDictionary<string, int> _connectionsByIp = new();
+        private readonly ConcurrentDictionary<string, List<DateTime>> _usernameChecksByConnection = new();
+
         private readonly TimeSpan _messageInterval = TimeSpan.FromSeconds(1);
+        private readonly TimeSpan _usernameCheckInterval = TimeSpan.FromMilliseconds(300);
+        private const int MAX_CONNECTIONS_PER_IP = 5;
+        private const int MAX_USERNAME_CHECKS_PER_MINUTE = 20;
+
+        // Security patterns for message validation
+        private readonly string[] _dangerousPatterns = {
+            "<script", "javascript:", "onload=", "onerror=", "onclick=", "onmouseover=",
+            "data:text/html", "vbscript:", "expression(", "eval(", "document.cookie",
+            "document.write", "window.location", "<iframe", "<object", "<embed",
+            "style=expression", "background:url", "-moz-binding"
+        };
 
         // Pre-defined rooms
         private readonly List<string> _allowedRooms = new()
@@ -37,16 +53,55 @@ namespace ChatApp.Services {
             }
         }
 
-        public async Task<bool> ReserveUsernameAsync(string connectionId, string username) {
+        // Enhanced security logging
+        private void LogSecurityEvent(string eventType, string details, string? connectionId = null, string? ipAddress = null) {
+            _logger.LogWarning("Security Event: {EventType} - {Details} - Connection: {ConnectionId} - IP: {IP}",
+                              eventType, details, connectionId ?? "Unknown", ipAddress ?? "Unknown");
+        }
+
+        // Connection tracking for rate limiting
+        public bool CanConnect(string ipAddress, string connectionId) {
             try {
-                if (!IsValidUsername(username)) {
-                    _logger.LogWarning("Invalid username attempted: {Username}", username);
+                // Track connections per IP
+                _connectionsByIp.AddOrUpdate(ipAddress, 1, (key, count) => count + 1);
+
+                if (_connectionsByIp[ipAddress] > MAX_CONNECTIONS_PER_IP) {
+                    LogSecurityEvent("ExcessiveConnections", $"IP exceeded connection limit", connectionId, ipAddress);
                     return false;
                 }
 
-                // Check if username is already taken
-                if (_globalUsernames.ContainsKey(username.ToLowerInvariant())) {
-                    _logger.LogWarning("Username already taken: {Username}", username);
+                return true;
+            } catch (Exception ex) {
+                _logger.LogError(ex, "Error checking connection limits");
+                return true; // Allow connection if check fails
+            }
+        }
+
+        public void RemoveConnection(string ipAddress) {
+            try {
+                _connectionsByIp.AddOrUpdate(ipAddress, 0, (key, count) => Math.Max(0, count - 1));
+            } catch (Exception ex) {
+                _logger.LogError(ex, "Error removing connection tracking");
+            }
+        }
+
+        public async Task<bool> ReserveUsernameAsync(string connectionId, string username) {
+            try {
+                if (!IsValidUsername(username)) {
+                    LogSecurityEvent("InvalidUsername", $"Invalid username attempted: {username}", connectionId);
+                    return false;
+                }
+
+                // Enhanced username validation
+                if (ContainsProfanity(username) || ContainsSuspiciousPatterns(username)) {
+                    LogSecurityEvent("SuspiciousUsername", $"Suspicious username attempted: {username}", connectionId);
+                    return false;
+                }
+
+                // Check if username is already taken (case-insensitive)
+                var lowerUsername = username.ToLowerInvariant();
+                if (_globalUsernames.ContainsKey(lowerUsername)) {
+                    _logger.LogInformation("Username already taken: {Username}", username);
                     return false;
                 }
 
@@ -56,14 +111,14 @@ namespace ChatApp.Services {
                 }
 
                 // Reserve the new username
-                _globalUsernames.TryAdd(username.ToLowerInvariant(), connectionId);
+                _globalUsernames.TryAdd(lowerUsername, connectionId);
 
                 // Create or update user
                 var user = new ChatUser {
                     ConnectionId = connectionId,
-                    Username = username,
+                    Username = username, // Keep original case
                     CurrentRoom = string.Empty,
-                    JoinedRooms = new HashSet<string>() // Multi-room support
+                    JoinedRooms = new HashSet<string>()
                 };
 
                 _users.AddOrUpdate(connectionId, user, (_, _) => user);
@@ -78,15 +133,15 @@ namespace ChatApp.Services {
 
         public async Task<bool> JoinRoomAsync(string connectionId, string roomName) {
             try {
-                // Get user - they must have reserved a username first
-                if (!_users.TryGetValue(connectionId, out var user)) {
-                    _logger.LogWarning("User attempted to join room without reserved username");
+                // Validate room name
+                if (!IsValidRoomName(roomName)) {
+                    LogSecurityEvent("InvalidRoomAccess", $"Attempt to join invalid room: {roomName}", connectionId);
                     return false;
                 }
 
-                // Check if room is allowed
-                if (!_allowedRooms.Contains(roomName.ToLowerInvariant())) {
-                    _logger.LogWarning("Attempt to join non-existent room: {RoomName}", roomName);
+                // Get user - they must have reserved a username first
+                if (!_users.TryGetValue(connectionId, out var user)) {
+                    LogSecurityEvent("UnauthorizedRoomJoin", "User attempted to join room without reserved username", connectionId);
                     return false;
                 }
 
@@ -97,20 +152,21 @@ namespace ChatApp.Services {
                 }
 
                 if (!room.CanJoin) {
-                    _logger.LogWarning("Room {RoomName} is full", roomName);
+                    _logger.LogInformation("Room {RoomName} is full", roomName);
                     return false;
                 }
 
                 // Check if user is already in this room
                 if (user.JoinedRooms.Contains(roomName)) {
                     _logger.LogInformation("User {Username} already in room {RoomName}", user.Username, roomName);
-                    return true; // Already in room, that's fine
+                    return true;
                 }
 
                 // Add user to room
                 user.JoinedRooms.Add(roomName);
-                user.CurrentRoom = roomName; // Set as active room
+                user.CurrentRoom = roomName;
                 room.Users.Add(user.Username);
+                user.LastActivity = DateTime.UtcNow;
 
                 _logger.LogInformation("User {Username} joined room {RoomName}", user.Username, roomName);
                 return true;
@@ -122,6 +178,10 @@ namespace ChatApp.Services {
 
         public async Task<bool> LeaveRoomAsync(string connectionId, string roomName) {
             try {
+                if (!IsValidRoomName(roomName)) {
+                    return false;
+                }
+
                 if (!_users.TryGetValue(connectionId, out var user)) {
                     return false;
                 }
@@ -131,6 +191,7 @@ namespace ChatApp.Services {
                 }
 
                 user.JoinedRooms.Remove(roomName);
+                user.LastActivity = DateTime.UtcNow;
 
                 // If this was the current room, switch to another room or none
                 if (user.CurrentRoom == roomName) {
@@ -147,17 +208,24 @@ namespace ChatApp.Services {
 
         public async Task<bool> SwitchToRoomAsync(string connectionId, string roomName) {
             try {
+                if (!IsValidRoomName(roomName)) {
+                    return false;
+                }
+
                 if (!_users.TryGetValue(connectionId, out var user)) {
                     return false;
                 }
 
                 // Check if user is in this room
                 if (!user.JoinedRooms.Contains(roomName)) {
-                    _logger.LogWarning("User {Username} attempted to switch to room {RoomName} they're not in", user.Username, roomName);
+                    LogSecurityEvent("UnauthorizedRoomSwitch",
+                        $"User {user.Username} attempted to switch to room {roomName} they're not in", connectionId);
                     return false;
                 }
 
                 user.CurrentRoom = roomName;
+                user.LastActivity = DateTime.UtcNow;
+
                 _logger.LogInformation("User {Username} switched to room {RoomName}", user.Username, roomName);
                 return true;
             } catch (Exception ex) {
@@ -168,33 +236,39 @@ namespace ChatApp.Services {
 
         public async Task<bool> SendMessageAsync(ChatMessage message) {
             try {
-                if (!IsValidMessage(message.Message) || !IsValidUsername(message.User)) {
-                    _logger.LogWarning("Invalid message from {User} in {Room}", message.User, message.Room);
+                // Enhanced message validation
+                if (!IsValidMessage(message.Message) || !IsValidUsername(message.User) || !IsValidRoomName(message.Room)) {
+                    LogSecurityEvent("InvalidMessage",
+                        $"Invalid message from {message.User} in {message.Room}", null);
                     return false;
                 }
 
-                // Check if room is allowed
-                if (!_allowedRooms.Contains(message.Room.ToLowerInvariant())) {
-                    _logger.LogWarning("Message sent to non-existent room: {Room}", message.Room);
+                // Check for malicious content
+                if (ContainsMaliciousContent(message.Message)) {
+                    LogSecurityEvent("MaliciousContent",
+                        $"Malicious content detected from {message.User}", null);
                     return false;
                 }
 
-                // Rate limiting
+                // Enhanced rate limiting
                 var now = DateTime.UtcNow;
-                var key = $"{message.User}_{message.Room}";
+                var userRoomKey = $"{message.User}_{message.Room}";
 
-                if (_lastMessageTime.TryGetValue(key, out var lastTime) && now - lastTime < _messageInterval) {
-                    _logger.LogWarning("Rate limit exceeded for user {User}", message.User);
+                if (_lastMessageTime.TryGetValue(userRoomKey, out var lastTime) &&
+                    now - lastTime < _messageInterval) {
+                    LogSecurityEvent("RateLimitExceeded", $"Rate limit exceeded for user {message.User}", null);
                     return false;
                 }
 
-                _lastMessageTime.AddOrUpdate(key, now, (_, _) => now);
+                _lastMessageTime.AddOrUpdate(userRoomKey, now, (_, _) => now);
 
-                // HTML encode message to prevent XSS
-                message.Message = System.Net.WebUtility.HtmlEncode(message.Message);
-                message.User = System.Net.WebUtility.HtmlEncode(message.User);
+                // Sanitize message content
+                message.Message = SanitizeMessage(message.Message);
+                message.User = WebUtility.HtmlEncode(message.User);
+                message.Room = WebUtility.HtmlEncode(message.Room);
 
-                _logger.LogInformation("Message sent by {User} in {Room}", message.User, message.Room);
+                _logger.LogInformation("Message sent by {User} in {Room}: {MessagePreview}",
+                    message.User, message.Room, message.Message.Substring(0, Math.Min(50, message.Message.Length)));
                 return true;
             } catch (Exception ex) {
                 _logger.LogError(ex, "Error sending message from {User}", message.User);
@@ -202,15 +276,120 @@ namespace ChatApp.Services {
             }
         }
 
+        // Enhanced username check with rate limiting
+        public bool CheckUsernameAvailability(string connectionId, string username) {
+            try {
+                // Rate limiting for username checks
+                var now = DateTime.UtcNow;
+                if (!_usernameChecksByConnection.ContainsKey(connectionId)) {
+                    _usernameChecksByConnection[connectionId] = new List<DateTime>();
+                }
+
+                var checks = _usernameChecksByConnection[connectionId];
+
+                // Remove checks older than 1 minute
+                checks.RemoveAll(time => now - time > TimeSpan.FromMinutes(1));
+
+                if (checks.Count >= MAX_USERNAME_CHECKS_PER_MINUTE) {
+                    LogSecurityEvent("ExcessiveUsernameChecks",
+                        $"Connection exceeded username check limit", connectionId);
+                    return false;
+                }
+
+                checks.Add(now);
+                return true;
+            } catch (Exception ex) {
+                _logger.LogError(ex, "Error checking username availability rate limit");
+                return false;
+            }
+        }
+
+        // Enhanced validation methods
+        public bool IsValidRoomName(string roomName) {
+            if (string.IsNullOrWhiteSpace(roomName)) return false;
+            if (roomName.Length > 30) return false;
+            return _allowedRooms.Contains(roomName.ToLowerInvariant());
+        }
+
+        public bool IsValidUsername(string username) {
+            if (string.IsNullOrWhiteSpace(username)) return false;
+            if (username.Length < 3 || username.Length > 20) return false;
+
+            // Only allow alphanumeric and some special characters
+            if (!Regex.IsMatch(username, @"^[a-zA-Z0-9_-]+$")) return false;
+
+            // Additional security checks
+            if (ContainsSuspiciousPatterns(username)) return false;
+
+            return true;
+        }
+
+        public bool IsValidMessage(string message) {
+            if (string.IsNullOrWhiteSpace(message)) return false;
+            if (message.Length > 500) return false;
+
+            // Check for suspicious patterns
+            return !ContainsMaliciousContent(message);
+        }
+
+        // Security helper methods
+        private bool ContainsMaliciousContent(string content) {
+            if (string.IsNullOrEmpty(content)) return false;
+
+            var lowerContent = content.ToLowerInvariant();
+            return _dangerousPatterns.Any(pattern => lowerContent.Contains(pattern));
+        }
+
+        private bool ContainsSuspiciousPatterns(string input) {
+            if (string.IsNullOrEmpty(input)) return false;
+
+            var lowerInput = input.ToLowerInvariant();
+
+            // Check for suspicious patterns in usernames
+            var suspiciousPatterns = new[] {
+                "admin", "system", "bot", "null", "undefined", "script", "test"
+            };
+
+            return suspiciousPatterns.Any(pattern => lowerInput.Contains(pattern));
+        }
+
+        private bool ContainsProfanity(string input) {
+            // Basic profanity filter - in production, use a comprehensive library
+            if (string.IsNullOrEmpty(input)) return false;
+
+            var lowerInput = input.ToLowerInvariant();
+            var basicProfanity = new[] { "badword1", "badword2" }; // Add actual words as needed
+
+            return basicProfanity.Any(word => lowerInput.Contains(word));
+        }
+
+        private string SanitizeMessage(string message) {
+            if (string.IsNullOrEmpty(message)) return string.Empty;
+
+            // HTML encode the message
+            var sanitized = WebUtility.HtmlEncode(message);
+
+            // Additional sanitization if needed
+            sanitized = sanitized.Trim();
+
+            return sanitized;
+        }
+
+        // Existing methods with enhanced security
         public List<string> GetAvailableRooms() {
             return _allowedRooms.ToList();
         }
 
         public Dictionary<string, int> GetRoomUserCounts() {
-            return _rooms.ToDictionary(
-                kvp => kvp.Key,
-                kvp => kvp.Value.Users.Count
-            );
+            try {
+                return _rooms.ToDictionary(
+                    kvp => kvp.Key,
+                    kvp => Math.Min(kvp.Value.Users.Count, 999) // Cap displayed count
+                );
+            } catch (Exception ex) {
+                _logger.LogError(ex, "Error getting room user counts");
+                return new Dictionary<string, int>();
+            }
         }
 
         public List<string> GetUserJoinedRooms(string connectionId) {
@@ -221,25 +400,8 @@ namespace ChatApp.Services {
         }
 
         public bool IsUsernameAvailable(string username) {
+            if (!IsValidUsername(username)) return false;
             return !_globalUsernames.ContainsKey(username.ToLowerInvariant());
-        }
-
-        public bool IsValidRoomName(string roomName) {
-            if (string.IsNullOrWhiteSpace(roomName)) return false;
-            return _allowedRooms.Contains(roomName.ToLowerInvariant());
-        }
-
-        public bool IsValidUsername(string username) {
-            if (string.IsNullOrWhiteSpace(username)) return false;
-            if (username.Length < 1 || username.Length > 20) return false;
-
-            // Only allow alphanumeric and some special characters
-            return Regex.IsMatch(username, @"^[a-zA-Z0-9_-]+$");
-        }
-
-        public bool IsValidMessage(string message) {
-            if (string.IsNullOrWhiteSpace(message)) return false;
-            return message.Length <= 500;
         }
 
         public ChatUser? GetUser(string connectionId) {
@@ -248,24 +410,64 @@ namespace ChatApp.Services {
         }
 
         public ChatRoom? GetRoom(string roomName) {
+            if (!IsValidRoomName(roomName)) return null;
             _rooms.TryGetValue(roomName, out var room);
             return room;
         }
 
         public void RemoveUser(string connectionId) {
-            if (_users.TryGetValue(connectionId, out var user)) {
-                // Remove from global usernames
-                _globalUsernames.TryRemove(user.Username.ToLowerInvariant(), out _);
+            try {
+                if (_users.TryGetValue(connectionId, out var user)) {
+                    // Remove from global usernames
+                    _globalUsernames.TryRemove(user.Username.ToLowerInvariant(), out _);
 
-                // Remove from all rooms
-                foreach (var roomName in user.JoinedRooms) {
-                    if (_rooms.TryGetValue(roomName, out var room)) {
-                        room.Users.Remove(user.Username);
+                    // Remove from all rooms
+                    foreach (var roomName in user.JoinedRooms.ToList()) {
+                        if (_rooms.TryGetValue(roomName, out var room)) {
+                            room.Users.Remove(user.Username);
+                        }
+                    }
+
+                    _logger.LogInformation("User {Username} removed from system", user.Username);
+                }
+
+                _users.TryRemove(connectionId, out _);
+
+                // Clean up rate limiting data
+                _lastMessageTime.Keys
+                    .Where(key => key.StartsWith($"{connectionId}_"))
+                    .ToList()
+                    .ForEach(key => _lastMessageTime.TryRemove(key, out _));
+
+                _usernameChecksByConnection.TryRemove(connectionId, out _);
+                _lastMessageByConnection.TryRemove(connectionId, out _);
+            } catch (Exception ex) {
+                _logger.LogError(ex, "Error removing user for connection {ConnectionId}", connectionId);
+            }
+        }
+
+        // Cleanup old data periodically (call this from a background service)
+        public void CleanupOldData() {
+            try {
+                var cutoffTime = DateTime.UtcNow.AddHours(-24);
+
+                // Clean up old username checks
+                foreach (var kvp in _usernameChecksByConnection.ToList()) {
+                    kvp.Value.RemoveAll(time => time < cutoffTime);
+                    if (!kvp.Value.Any()) {
+                        _usernameChecksByConnection.TryRemove(kvp.Key, out _);
                     }
                 }
-            }
 
-            _users.TryRemove(connectionId, out _);
+                // Clean up old message times
+                foreach (var kvp in _lastMessageTime.ToList()) {
+                    if (kvp.Value < cutoffTime) {
+                        _lastMessageTime.TryRemove(kvp.Key, out _);
+                    }
+                }
+            } catch (Exception ex) {
+                _logger.LogError(ex, "Error cleaning up old data");
+            }
         }
     }
 }
