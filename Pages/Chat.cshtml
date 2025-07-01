@@ -20,75 +20,75 @@
             <div id="connectionStatus" class="connection-status-small">Connecting...</div>
 
             <div class="room-list">
-                <div class="room-item" data-room="general" onclick="chatClient.switchToRoomFromSidebar('general')">
+                <div class="room-item" data-room="general" onclick="switchToRoomFromSidebar('general')">
                     <div class="room-icon">💬</div>
                     <div class="room-details">
                         <div class="room-name">General Chat</div>
                         <div class="room-count"><span id="count-general">0</span> users</div>
                     </div>                    
                     <div class="room-actions" onclick="event.stopPropagation()">
-                        <button class="btn-join" onclick="chatClient.joinRoom('general')">Join</button>
-                        <button class="btn-leave" onclick="chatClient.leaveRoom('general')" style="display: none;">Leave</button>
+                        <button class="btn-join" onclick="joinRoom('general')">Join</button>
+                        <button class="btn-leave" onclick="leaveRoom('general')" style="display: none;">Leave</button>
                     </div>
                 </div>
 
-                <div class="room-item" data-room="family" onclick="chatClient.switchToRoomFromSidebar('family')">
+                <div class="room-item" data-room="family" onclick="switchToRoomFromSidebar('family')">
                     <div class="room-icon">👨‍👩‍👧‍👦</div>
                     <div class="room-details">
                         <div class="room-name">Family</div>
                         <div class="room-count"><span id="count-family">0</span> users</div>
                     </div>
                     <div class="room-actions" onclick="event.stopPropagation()">
-                        <button class="btn-join" onclick="chatClient.joinRoom('family')">Join</button>
-                        <button class="btn-leave" onclick="chatClient.leaveRoom('family')" style="display: none;">Leave</button>
+                        <button class="btn-join" onclick="joinRoom('family')">Join</button>
+                        <button class="btn-leave" onclick="leaveRoom('family')" style="display: none;">Leave</button>
                     </div>
                 </div>
 
-                <div class="room-item" data-room="friends" onclick="chatClient.switchToRoomFromSidebar('friends')">
+                <div class="room-item" data-room="friends" onclick="switchToRoomFromSidebar('friends')">
                     <div class="room-icon">👫</div>
                     <div class="room-details">
                         <div class="room-name">Friends</div>
                         <div class="room-count"><span id="count-friends">0</span> users</div>
                     </div>
                     <div class="room-actions" onclick="event.stopPropagation()">
-                        <button class="btn-join" onclick="chatClient.joinRoom('friends')">Join</button>
-                        <button class="btn-leave" onclick="chatClient.leaveRoom('friends')" style="display: none;">Leave</button>
+                        <button class="btn-join" onclick="joinRoom('friends')">Join</button>
+                        <button class="btn-leave" onclick="leaveRoom('friends')" style="display: none;">Leave</button>
                     </div>
                 </div>
 
-                <div class="room-item" data-room="gaming" onclick="chatClient.switchToRoomFromSidebar('gaming')">
+                <div class="room-item" data-room="gaming" onclick="switchToRoomFromSidebar('gaming')">
                     <div class="room-icon">🎮</div>
                     <div class="room-details">
                         <div class="room-name">Gaming</div>
                         <div class="room-count"><span id="count-gaming">0</span> users</div>
                     </div>
                     <div class="room-actions" onclick="event.stopPropagation()">
-                        <button class="btn-join" onclick="chatClient.joinRoom('gaming')">Join</button>
-                        <button class="btn-leave" onclick="chatClient.leaveRoom('gaming')" style="display: none;">Leave</button>
+                        <button class="btn-join" onclick="joinRoom('gaming')">Join</button>
+                        <button class="btn-leave" onclick="leaveRoom('gaming')" style="display: none;">Leave</button>
                     </div>
                 </div>
 
-                <div class="room-item" data-room="tech" onclick="chatClient.switchToRoomFromSidebar('tech')">
+                <div class="room-item" data-room="tech" onclick="switchToRoomFromSidebar('tech')">
                     <div class="room-icon">💻</div>
                     <div class="room-details">
                         <div class="room-name">Tech Talk</div>
                         <div class="room-count"><span id="count-tech">0</span> users</div>
                     </div>
                     <div class="room-actions" onclick="event.stopPropagation()">
-                        <button class="btn-join" onclick="chatClient.joinRoom('tech')">Join</button>
-                        <button class="btn-leave" onclick="chatClient.leaveRoom('tech')" style="display: none;">Leave</button>
+                        <button class="btn-join" onclick="joinRoom('tech')">Join</button>
+                        <button class="btn-leave" onclick="leaveRoom('tech')" style="display: none;">Leave</button>
                     </div>
                 </div>
 
-                <div class="room-item" data-room="random" onclick="chatClient.switchToRoomFromSidebar('random')">
+                <div class="room-item" data-room="random" onclick="switchToRoomFromSidebar('random')">
                     <div class="room-icon">🎲</div>
                     <div class="room-details">
                         <div class="room-name">Random</div>
                         <div class="room-count"><span id="count-random">0</span> users</div>
                     </div>
                     <div class="room-actions" onclick="event.stopPropagation()">
-                        <button class="btn-join" onclick="chatClient.joinRoom('random')">Join</button>
-                        <button class="btn-leave" onclick="chatClient.leaveRoom('random')" style="display: none;">Leave</button>
+                        <button class="btn-join" onclick="joinRoom('random')">Join</button>
+                        <button class="btn-leave" onclick="leaveRoom('random')" style="display: none;">Leave</button>
                     </div>
                 </div>
             </div>
@@ -118,4 +118,4 @@
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/7.0.0/signalr.min.js"></script>
-<script src="~/js/chat.js"></script>
+<script type="module" src="~/js/app.js"></script>

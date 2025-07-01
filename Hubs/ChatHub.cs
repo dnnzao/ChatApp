@@ -50,10 +50,15 @@ namespace ChatApp.Hubs {
                     // Load and send recent message history for this room
                     try {
                         var recentMessages = await _chatService.GetRecentMessagesAsync(roomName, 50);
+                        _logger.LogInformation("Retrieved {Count} messages from database for room {RoomName}", 
+                                             recentMessages.Count, roomName);
+                        
                         if (recentMessages.Any()) {
                             await Clients.Caller.SendAsync("MessageHistory", roomName, recentMessages);
-                            _logger.LogDebug("Sent {Count} historical messages to user {Username} for room {RoomName}",
-                                           recentMessages.Count, user.Username, roomName);
+                            _logger.LogInformation("Sent {Count} historical messages to user {Username} for room {RoomName}",
+                                                 recentMessages.Count, user.Username, roomName);
+                        } else {
+                            _logger.LogInformation("No historical messages found for room {RoomName}", roomName);
                         }
                     } catch (Exception historyEx) {
                         _logger.LogError(historyEx, "Failed to load message history for room {RoomName}", roomName);

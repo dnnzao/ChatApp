@@ -63,15 +63,17 @@
 
         // Username management events
         this.connection.on("UsernameReserved", (username) => {
+            // Create session compatible with new SessionManager
+            const now = Date.now();
             const sessionData = {
                 username: username,
-                timestamp: Date.now(),
-                sessionId: crypto.randomUUID(),
-                checksum: this.generateChecksum(username)
+                timestamp: now,
+                hash: this.generateSessionHash(username, now),
+                version: "2.0"
             };
 
             sessionStorage.setItem("chatSession", JSON.stringify(sessionData));
-            sessionStorage.setItem("chatUsername", username);
+            sessionStorage.setItem("chatUsername", username); // Keep for backward compatibility
             window.location.href = "/Chat";
         });
 
@@ -170,15 +172,19 @@
         return /^[a-zA-Z0-9_-]+$/.test(username);
     }
 
-    // Simple checksum for session integrity
-    generateChecksum(username) {
+    // Generate session hash compatible with SessionManager
+    generateSessionHash(username, timestamp) {
+        // Simple hash for session integrity (not cryptographically secure)
+        const data = `${username}-${timestamp}-${navigator.userAgent.slice(0, 20)}`;
         let hash = 0;
-        for (let i = 0; i < username.length; i++) {
-            const char = username.charCodeAt(i);
+
+        for (let i = 0; i < data.length; i++) {
+            const char = data.charCodeAt(i);
             hash = ((hash << 5) - hash) + char;
             hash = hash & hash; // Convert to 32-bit integer
         }
-        return hash.toString();
+
+        return hash.toString(36);
     }
 
     sanitizeErrorMessage(error) {
