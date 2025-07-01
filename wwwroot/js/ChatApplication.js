@@ -1,4 +1,4 @@
-import { SessionManager } from './core/SessionManager.js';
+﻿import { SessionManager } from './core/SessionManager.js';
 import { ConnectionManager } from './core/ConnectionManager.js';
 import { ValidationService } from './core/ValidationService.js';
 import { UIManager } from './core/UIManager.js';
@@ -185,7 +185,7 @@ export class ChatApplication {
      * @param {string} roomName 
      * @returns {boolean}
      */
-    switchToRoom(roomName) {
+    async switchToRoom(roomName) {
         const validationService = this._getDependency('validationService');
 
         if (!validationService.isValidRoomName(roomName)) {
@@ -197,18 +197,29 @@ export class ChatApplication {
             return false;
         }
 
-        // Update current room
-        this.currentRoom = roomName;
+        try {
+            // ✅ ADD THIS: Tell the server about the room switch
+            const connectionManager = this._getDependency('connectionManager');
+            await connectionManager.invoke("SwitchToRoom", roomName);
 
-        const uiManager = this._getDependency('uiManager');
-        uiManager.updateCurrentRoomDisplay(roomName);
+            // Update current room
+            this.currentRoom = roomName;
 
-        // Clear current messages and display messages for the new room
-        uiManager.clearMessages();
-        this._displayRoomMessages(roomName);
+            const uiManager = this._getDependency('uiManager');
+            uiManager.updateCurrentRoomDisplay(roomName);
 
-        console.log(`Switched to room: ${roomName}`);
-        return true;
+            // Clear current messages and display messages for the new room
+            uiManager.clearMessages();
+            this._displayRoomMessages(roomName);
+
+            console.log(`Switched to room: ${roomName}`);
+            return true;
+
+        } catch (error) {
+            console.error(`Failed to switch to room ${roomName}:`, error);
+            this._handleError(error);
+            return false;
+        }
     }
 
     /**
