@@ -47,6 +47,19 @@ namespace ChatApp.Hubs {
                     await Clients.Group(roomName).SendAsync("UserJoined", $"{user.Username} joined {roomName}");
                     await Clients.Caller.SendAsync("JoinedRoom", roomName);
 
+                    // Load and send recent message history for this room
+                    try {
+                        var recentMessages = await _chatService.GetRecentMessagesAsync(roomName, 50);
+                        if (recentMessages.Any()) {
+                            await Clients.Caller.SendAsync("MessageHistory", roomName, recentMessages);
+                            _logger.LogDebug("Sent {Count} historical messages to user {Username} for room {RoomName}",
+                                           recentMessages.Count, user.Username, roomName);
+                        }
+                    } catch (Exception historyEx) {
+                        _logger.LogError(historyEx, "Failed to load message history for room {RoomName}", roomName);
+                        // Don't fail the join operation if history loading fails
+                    }
+
                     // Update room counts for all users
                     var roomCounts = _chatService.GetRoomUserCounts();
                     await Clients.All.SendAsync("RoomCountsUpdated", roomCounts);

@@ -2,6 +2,8 @@
 
 namespace ChatApp.Models {
     public class ChatMessage {
+        public int? Id { get; set; } // Database ID (null for new messages)
+        
         [Required]
         [StringLength(50, MinimumLength = 1)]
         public string User { get; set; } = string.Empty;

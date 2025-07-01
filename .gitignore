@@ -17,6 +17,14 @@ bld/
 # Visual Studio
 .vs/
 .vscode/
+
+##
+## SQLite Database Files
+##
+Data/
+*.db
+*.sqlite
+*.sqlite3
 *.user
 *.userosscache
 *.sln.docstates

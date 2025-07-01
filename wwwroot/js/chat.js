@@ -29,6 +29,90 @@
         this.initializeUI();
     }
 
+    // Helper method to parse timestamps consistently
+    parseTimestamp(timestampValue) {
+        try {
+            console.log('Parsing timestamp:', timestampValue, 'Type:', typeof timestampValue);
+
+            // If it's already a Date object, return it
+            if (timestampValue instanceof Date) {
+                return timestampValue;
+            }
+
+            // If it's a string, handle different formats
+            if (typeof timestampValue === 'string') {
+                // ISO format with timezone (e.g., "2024-12-19T21:40:45.123Z")
+                if (timestampValue.includes('Z') || timestampValue.includes('+') || timestampValue.includes('-')) {
+                    return new Date(timestampValue);
+                }
+
+                // Assume it's UTC if no timezone info
+                // Convert "2024-12-19T21:40:45.123" to proper UTC
+                const utcString = timestampValue.endsWith('Z') ? timestampValue : timestampValue + 'Z';
+                return new Date(utcString);
+            }
+
+            // If it's a number (timestamp), convert it
+            if (typeof timestampValue === 'number') {
+                return new Date(timestampValue);
+            }
+
+            // Try to parse as-is
+            const parsed = new Date(timestampValue);
+            if (isNaN(parsed.getTime())) {
+                console.warn('Could not parse timestamp, using current time:', timestampValue);
+                return new Date();
+            }
+
+            return parsed;
+        } catch (error) {
+            console.error('Error parsing timestamp:', timestampValue, error);
+            return new Date(); // Fallback to current time
+        }
+    }
+
+    // Helper method to parse timestamps consistently
+    parseTimestamp(timestampValue) {
+        try {
+            console.log('Parsing timestamp:', timestampValue, 'Type:', typeof timestampValue);
+
+            // If it's already a Date object, return it
+            if (timestampValue instanceof Date) {
+                return timestampValue;
+            }
+
+            // If it's a string, handle different formats
+            if (typeof timestampValue === 'string') {
+                // ISO format with timezone (e.g., "2024-12-19T21:40:45.123Z")
+                if (timestampValue.includes('Z') || timestampValue.includes('+') || timestampValue.includes('-')) {
+                    return new Date(timestampValue);
+                }
+
+                // Assume it's UTC if no timezone info
+                // Convert "2024-12-19T21:40:45.123" to proper UTC
+                const utcString = timestampValue.endsWith('Z') ? timestampValue : timestampValue + 'Z';
+                return new Date(utcString);
+            }
+
+            // If it's a number (timestamp), convert it
+            if (typeof timestampValue === 'number') {
+                return new Date(timestampValue);
+            }
+
+            // Try to parse as-is
+            const parsed = new Date(timestampValue);
+            if (isNaN(parsed.getTime())) {
+                console.warn('Could not parse timestamp, using current time:', timestampValue);
+                return new Date();
+            }
+
+            return parsed;
+        } catch (error) {
+            console.error('Error parsing timestamp:', timestampValue, error);
+            return new Date(); // Fallback to current time
+        }
+    }
+
     // Enhanced session validation with security checks
     validateSession() {
         try {
@@ -223,6 +307,10 @@
                 return;
             }
             this.displayMessage(user, message, room);
+        });
+
+        this.connection.on("MessageHistory", (roomName, messages) => {
+            this.loadMessageHistory(roomName, messages);
         });
 
         this.connection.on("UserJoined", (message) => {
@@ -516,7 +604,7 @@
             user: user,
             message: message,
             room: room,
-            timestamp: new Date()
+            timestamp: new Date() // Live messages use current local time
         };
 
         this.roomMessages.get(room).push(messageData);
@@ -535,7 +623,7 @@
             message: message,
             systemType: type,
             room: this.currentRoom,
-            timestamp: new Date()
+            timestamp: new Date() // System messages use current local time
         };
 
         if (this.roomMessages.has(this.currentRoom)) {
@@ -552,6 +640,11 @@
 
         const li = document.createElement("li");
         li.className = "message";
+
+        // Add class for historical messages
+        if (messageData.isHistorical) {
+            li.classList.add("historical-message");
+        }
 
         // Create elements safely without innerHTML
         const timestampSpan = document.createElement("span");
@@ -571,7 +664,11 @@
         li.appendChild(textSpan);
 
         messagesList.appendChild(li);
-        this.scrollToBottom();
+
+        // Only scroll to bottom for new messages, not historical ones
+        if (!messageData.isHistorical) {
+            this.scrollToBottom();
+        }
     }
 
     renderSystemMessage(messageData) {
@@ -612,6 +709,51 @@
                     this.renderSystemMessage(messageData);
                 }
             });
+        }
+    }
+
+    loadMessageHistory(roomName, messages) {
+        try {
+            if (!this.isValidRoomName(roomName) || !Array.isArray(messages)) {
+                console.error("Invalid message history data received");
+                return;
+            }
+
+            // Initialize room messages if not exists
+            if (!this.roomMessages.has(roomName)) {
+                this.roomMessages.set(roomName, []);
+            }
+
+            // Clear existing messages for this room (in case of reload)
+            this.roomMessages.set(roomName, []);
+
+            // Add historical messages to room messages
+            messages.forEach(msg => {
+                if (this.isValidUsernameFormat(msg.user) &&
+                    this.isValidMessage(msg.message) &&
+                    this.isValidRoomName(msg.room)) {
+
+                    const messageData = {
+                        user: msg.user,
+                        message: msg.message,
+                        room: msg.room,
+                        timestamp: this.parseTimestamp(msg.timestamp),
+                        type: 'message',
+                        isHistorical: true
+                    };
+
+                    this.roomMessages.get(roomName).push(messageData);
+                }
+            });
+
+            // If this is the current room, display the messages
+            if (this.currentRoom === roomName) {
+                this.loadRoomMessages(roomName);
+            }
+
+            console.log(`Loaded ${messages.length} historical messages for room ${roomName}`);
+        } catch (error) {
+            console.error("Error loading message history:", error);
         }
     }
 

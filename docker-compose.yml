@@ -1,6 +1,6 @@
 services:
   chatapp:
-    build: 
+    build:
       context: .
       dockerfile: Dockerfile
     container_name: multi-room-chat
@@ -9,6 +9,8 @@ services:
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
       - ASPNETCORE_URLS=http://+:80
+    volumes:
+      - ./Data:/app/Data
     restart: unless-stopped
     networks:
       - chat-network

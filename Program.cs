@@ -24,11 +24,17 @@ builder.Services.AddSignalR(options => {
     if (!builder.Environment.IsDevelopment()) {
         options.EnableDetailedErrors = false;
     }
+}).AddJsonProtocol(options => {
+    // Configure JSON serialization for SignalR to handle DateTime consistently
+    // Ensure DateTime values are serialized in ISO 8601 format with timezone
+    options.PayloadSerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
+    options.PayloadSerializerOptions.WriteIndented = false;
 });
 
-builder.Services.AddHealthChecks();
+// Register SQLite message repository
+builder.Services.AddSingleton<IMessageRepository, SqliteMessageRepository>();
 
-// Register custom services
+// Register chat service (singleton to maintain state)
 builder.Services.AddSingleton<IChatService, ChatService>();
 
 // Add logging with security considerations
@@ -51,6 +57,16 @@ builder.Services.AddRateLimiter(options => {
 });
 
 var app = builder.Build();
+
+// Initialize database on startup
+try {
+    var messageRepository = app.Services.GetRequiredService<IMessageRepository>();
+    await messageRepository.InitializeDatabaseAsync();
+    app.Logger.LogInformation("Database initialized successfully");
+} catch (Exception ex) {
+    app.Logger.LogError(ex, "Failed to initialize database");
+    throw; // Stop application if database initialization fails
+}
 
 // Configure pipeline with enhanced security
 if (!app.Environment.IsDevelopment()) {
@@ -139,9 +155,6 @@ app.Use(async (context, next) => {
 // Map routes
 app.MapRazorPages();
 app.MapHub<ChatHub>("/chatHub");
-
-// Security: Add a simple health check endpoint (optional)
-app.MapHealthChecks("/health");
 
 // Security: Log application startup
 app.Logger.LogInformation("ChatApp started in {Environment} mode", app.Environment.EnvironmentName);

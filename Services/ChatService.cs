@@ -10,6 +10,7 @@ namespace ChatApp.Services {
         private readonly ConcurrentDictionary<string, ChatRoom> _rooms = new(); // roomName -> room
         private readonly ConcurrentDictionary<string, string> _globalUsernames = new(); // username -> connectionId
         private readonly ILogger<ChatService> _logger;
+        private readonly IMessageRepository _messageRepository;
 
         // Enhanced rate limiting with multiple tracking methods
         private readonly ConcurrentDictionary<string, DateTime> _lastMessageTime = new();
@@ -41,8 +42,9 @@ namespace ChatApp.Services {
             "random"
         };
 
-        public ChatService(ILogger<ChatService> logger) {
+        public ChatService(ILogger<ChatService> logger, IMessageRepository messageRepository) {
             _logger = logger;
+            _messageRepository = messageRepository;
             InitializeRooms();
         }
 
@@ -267,6 +269,18 @@ namespace ChatApp.Services {
                 message.User = WebUtility.HtmlEncode(message.User);
                 message.Room = WebUtility.HtmlEncode(message.Room);
 
+                // Save message to database
+                try {
+                    var messageId = await _messageRepository.SaveMessageAsync(message);
+                    message.Id = messageId;
+                    _logger.LogInformation("Message saved with ID {MessageId} by {User} in {Room}",
+                        messageId, message.User, message.Room);
+                } catch (Exception ex) {
+                    _logger.LogError(ex, "Failed to save message to database from {User} in {Room}",
+                        message.User, message.Room);
+                    // Continue without failing the message send
+                }
+
                 _logger.LogInformation("Message sent by {User} in {Room}: {MessagePreview}",
                     message.User, message.Room, message.Message.Substring(0, Math.Min(50, message.Message.Length)));
                 return true;
@@ -467,6 +481,55 @@ namespace ChatApp.Services {
                 }
             } catch (Exception ex) {
                 _logger.LogError(ex, "Error cleaning up old data");
+            }
+        }
+
+        // Message history methods
+        public async Task<List<ChatMessage>> GetRecentMessagesAsync(string roomName, int count = 50) {
+            try {
+                if (!IsValidRoomName(roomName)) {
+                    _logger.LogWarning("Invalid room name requested for message history: {RoomName}", roomName);
+                    return new List<ChatMessage>();
+                }
+
+                return await _messageRepository.GetRecentMessagesAsync(roomName, count);
+            } catch (Exception ex) {
+                _logger.LogError(ex, "Error getting recent messages for room {RoomName}", roomName);
+                return new List<ChatMessage>();
+            }
+        }
+
+        public async Task<List<ChatMessage>> GetMessagesByUserAsync(string username, int count = 100) {
+            try {
+                if (!IsValidUsername(username)) {
+                    _logger.LogWarning("Invalid username requested for message history: {Username}", username);
+                    return new List<ChatMessage>();
+                }
+
+                return await _messageRepository.GetMessagesByUserAsync(username, count);
+            } catch (Exception ex) {
+                _logger.LogError(ex, "Error getting messages by user {Username}", username);
+                return new List<ChatMessage>();
+            }
+        }
+
+        public async Task<List<ChatMessage>> SearchMessagesAsync(string roomName, string searchTerm, int count = 50) {
+            try {
+                if (!IsValidRoomName(roomName) || string.IsNullOrWhiteSpace(searchTerm)) {
+                    _logger.LogWarning("Invalid search parameters: room={RoomName}, term={SearchTerm}", roomName, searchTerm);
+                    return new List<ChatMessage>();
+                }
+
+                // Basic sanitization of search term
+                searchTerm = searchTerm.Trim();
+                if (searchTerm.Length > 100) {
+                    searchTerm = searchTerm.Substring(0, 100);
+                }
+
+                return await _messageRepository.SearchMessagesAsync(roomName, searchTerm, count);
+            } catch (Exception ex) {
+                _logger.LogError(ex, "Error searching messages in room {RoomName} for term {SearchTerm}", roomName, searchTerm);
+                return new List<ChatMessage>();
             }
         }
     }
