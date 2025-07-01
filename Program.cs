@@ -26,6 +26,8 @@ builder.Services.AddSignalR(options => {
     }
 });
 
+builder.Services.AddHealthChecks();
+
 // Register custom services
 builder.Services.AddSingleton<IChatService, ChatService>();
 
@@ -139,7 +141,7 @@ app.MapRazorPages();
 app.MapHub<ChatHub>("/chatHub");
 
 // Security: Add a simple health check endpoint (optional)
-app.MapGet("/health", () => "OK");
+app.MapHealthChecks("/health");
 
 // Security: Log application startup
 app.Logger.LogInformation("ChatApp started in {Environment} mode", app.Environment.EnvironmentName);
