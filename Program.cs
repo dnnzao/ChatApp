@@ -3,14 +3,16 @@ using ChatApp.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services
 builder.Services.AddRazorPages();
 
 // Enhanced SignalR configuration with security settings
 builder.Services.AddSignalR(options => {
     options.EnableDetailedErrors = builder.Environment.IsDevelopment();
-    options.ClientTimeoutInterval = TimeSpan.FromSeconds(30);
-    options.KeepAliveInterval = TimeSpan.FromSeconds(15);
+
+    // Increase timeouts for ngrok stability
+    options.ClientTimeoutInterval = TimeSpan.FromSeconds(60);
+    options.KeepAliveInterval = TimeSpan.FromSeconds(30);
+    options.HandshakeTimeout = TimeSpan.FromSeconds(30);
 
     // Security: Limit message size to prevent large payloads
     options.MaximumReceiveMessageSize = 1024; // 1KB max per message
@@ -82,10 +84,10 @@ app.Use(async (context, next) => {
     // Content Security Policy for enhanced XSS protection
     var csp = "default-src 'self'; " +
               "script-src 'self' https://cdnjs.cloudflare.com 'unsafe-inline'; " +
-              "style-src 'self' 'unsafe-inline'; " +
-              "connect-src 'self'; " +
+              "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com http://fonts.googleapis.com; " +
+              "connect-src 'self'" + (app.Environment.IsDevelopment() ? " ws://localhost:* wss://localhost:* http://localhost:*" : "") + "; " +
               "img-src 'self' data:; " +
-              "font-src 'self'; " +
+              "font-src 'self' https://fonts.gstatic.com http://fonts.gstatic.com; " +
               "object-src 'none'; " +
               "media-src 'none'; " +
               "frame-src 'none';";
@@ -118,22 +120,18 @@ app.UseRouting();
 
 // Security: Custom middleware for connection tracking and abuse prevention
 app.Use(async (context, next) => {
-    try {
-        // Track and limit connections per IP
-        var ipAddress = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
-
-        // Log potentially suspicious activity
-        var userAgent = context.Request.Headers.UserAgent.ToString();
-        if (string.IsNullOrEmpty(userAgent) || userAgent.Length > 500) {
-            app.Logger.LogWarning("Suspicious request from IP {IP} with user agent: {UserAgent}",
-                ipAddress, userAgent?.Substring(0, Math.Min(100, userAgent.Length)));
-        }
-
-        await next();
-    } catch (Exception ex) {
-        app.Logger.LogError(ex, "Error in security middleware");
-        await next();
+    // Handle ngrok headers
+    if (context.Request.Headers.ContainsKey("X-Forwarded-Proto")) {
+        context.Request.Scheme = context.Request.Headers["X-Forwarded-Proto"];
     }
+
+    if (context.Request.Headers.ContainsKey("X-Forwarded-For")) {
+        var forwardedFor = context.Request.Headers["X-Forwarded-For"].ToString();
+        var ip = forwardedFor.Split(',')[0].Trim();
+        context.Connection.RemoteIpAddress = System.Net.IPAddress.Parse(ip);
+    }
+
+    await next();
 });
 
 // Map routes

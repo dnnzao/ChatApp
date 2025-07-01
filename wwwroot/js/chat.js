@@ -1,23 +1,28 @@
 ﻿class ChatClient {
     constructor() {
-        // Enhanced session validation
         this.username = this.validateSession();
         if (!this.username) {
-            // Redirect to login page if no valid session found
             window.location.href = "/";
             return;
         }
 
-        this.connection = new signalR.HubConnectionBuilder().withUrl("/chatHub").build();
+        this.connection = new signalR.HubConnectionBuilder()
+            .withUrl("/chatHub")
+            .withAutomaticReconnect([0, 2000, 10000, 30000])
+            .configureLogging(signalR.LogLevel.Information)
+            .build();
+
         this.currentRoom = "";
         this.joinedRooms = new Set();
         this.roomMessages = new Map();
         this.isConnected = false;
         this.isLoggedIn = true;
+        this.reconnectAttempts = 0;
+        this.maxReconnectAttempts = 5;
 
         // Security: Rate limiting for client-side actions
         this.lastMessageTime = 0;
-        this.MESSAGE_COOLDOWN = 1000; // 1 second
+        this.MESSAGE_COOLDOWN = 1000;
 
         this.initializeConnection();
         this.setupEventHandlers();
@@ -87,6 +92,7 @@
         try {
             await this.connection.start();
             this.isConnected = true;
+            this.reconnectAttempts = 0;
             this.updateConnectionStatus("Connected");
 
             // Re-reserve username since this is a new connection
@@ -96,16 +102,52 @@
         } catch (err) {
             console.error("SignalR Connection Error: ", err);
             this.updateConnectionStatus("Connection Failed");
-            setTimeout(() => this.initializeConnection(), 5000);
+            this.reconnectAttempts++;
+
+            if (this.reconnectAttempts < this.maxReconnectAttempts) {
+                const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
+                setTimeout(() => this.initializeConnection(), delay);
+            } else {
+                this.updateConnectionStatus("Connection Failed - Please Refresh");
+            }
         }
     }
 
     setupEventHandlers() {
         // Connection events
-        this.connection.onclose(() => {
+        this.connection.onclose((error) => {
             this.isConnected = false;
             this.updateConnectionStatus("Disconnected");
-            setTimeout(() => this.initializeConnection(), 5000);
+            console.log("Connection closed:", error);
+        });
+
+        this.connection.onreconnecting((error) => {
+            this.isConnected = false;
+            this.updateConnectionStatus("Reconnecting...");
+            console.log("Reconnecting:", error);
+        });
+
+        this.connection.onreconnected(async (connectionId) => {
+            this.isConnected = true;
+            this.updateConnectionStatus("Reconnected");
+            console.log("Reconnected with ID:", connectionId);
+
+            // Re-establish session after reconnection
+            try {
+                await this.connection.invoke("ReserveUsername", this.username);
+
+                // Rejoin all rooms
+                for (const roomName of this.joinedRooms) {
+                    await this.connection.invoke("JoinRoom", roomName);
+                }
+
+                // Switch back to current room if we had one
+                if (this.currentRoom && this.joinedRooms.has(this.currentRoom)) {
+                    await this.connection.invoke("SwitchToRoom", this.currentRoom);
+                }
+            } catch (error) {
+                console.error("Error re-establishing session:", error);
+            }
         });
 
         // Username management events

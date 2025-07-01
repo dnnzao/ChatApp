@@ -1,9 +1,16 @@
 ﻿class LoginClient {
     constructor() {
-        this.connection = new signalR.HubConnectionBuilder().withUrl("/chatHub").build();
+        this.connection = new signalR.HubConnectionBuilder()
+            .withUrl("/chatHub")
+            .withAutomaticReconnect([0, 2000, 10000, 30000]) // Add automatic reconnection
+            .configureLogging(signalR.LogLevel.Information)
+            .build();
+
         this.isConnected = false;
         this.lastUsernameCheck = 0;
-        this.USERNAME_CHECK_COOLDOWN = 300; // 300ms cooldown for username checks
+        this.USERNAME_CHECK_COOLDOWN = 300;
+        this.reconnectAttempts = 0;
+        this.maxReconnectAttempts = 5;
 
         this.initializeConnection();
         this.setupEventHandlers();
@@ -13,43 +20,58 @@
         try {
             await this.connection.start();
             this.isConnected = true;
+            this.reconnectAttempts = 0;
             this.updateConnectionStatus("Connected");
             document.getElementById("reserveUsernameBtn").disabled = false;
             console.log("SignalR Connected");
         } catch (err) {
             console.error("SignalR Connection Error: ", err);
             this.updateConnectionStatus("Connection Failed");
-            setTimeout(() => this.initializeConnection(), 5000);
+            this.reconnectAttempts++;
+
+            if (this.reconnectAttempts < this.maxReconnectAttempts) {
+                const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
+                setTimeout(() => this.initializeConnection(), delay);
+            } else {
+                this.updateConnectionStatus("Connection Failed - Refresh Page");
+            }
         }
     }
 
     setupEventHandlers() {
-        // Connection events
-        this.connection.onclose(() => {
+        // Enhanced connection events
+        this.connection.onclose((error) => {
             this.isConnected = false;
             this.updateConnectionStatus("Disconnected");
             document.getElementById("reserveUsernameBtn").disabled = true;
-            setTimeout(() => this.initializeConnection(), 5000);
+            console.log("Connection closed:", error);
+        });
+
+        this.connection.onreconnecting((error) => {
+            this.isConnected = false;
+            this.updateConnectionStatus("Reconnecting...");
+            document.getElementById("reserveUsernameBtn").disabled = true;
+            console.log("Reconnecting:", error);
+        });
+
+        this.connection.onreconnected((connectionId) => {
+            this.isConnected = true;
+            this.updateConnectionStatus("Reconnected");
+            document.getElementById("reserveUsernameBtn").disabled = false;
+            console.log("Reconnected with ID:", connectionId);
         });
 
         // Username management events
         this.connection.on("UsernameReserved", (username) => {
-            // Create secure session data
             const sessionData = {
                 username: username,
                 timestamp: Date.now(),
                 sessionId: crypto.randomUUID(),
-                // Add a simple checksum for integrity
                 checksum: this.generateChecksum(username)
             };
 
-            // Store session data securely
             sessionStorage.setItem("chatSession", JSON.stringify(sessionData));
-
-            // Also keep old format for backward compatibility (temporary)
             sessionStorage.setItem("chatUsername", username);
-
-            // Redirect to chat page
             window.location.href = "/Chat";
         });
 
