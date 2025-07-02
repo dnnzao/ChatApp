@@ -8,6 +8,7 @@ builder.Services.AddRazorPages();
 // Enhanced SignalR configuration with security settings
 builder.Services.AddSignalR(options => {
     options.EnableDetailedErrors = builder.Environment.IsDevelopment();
+    options.EnableDetailedErrors = true;
 
     // Increase timeouts for ngrok stability
     options.ClientTimeoutInterval = TimeSpan.FromSeconds(60);
@@ -103,7 +104,9 @@ app.Use(async (context, next) => {
     var csp = "default-src 'self'; " +
               "script-src 'self' https://cdnjs.cloudflare.com 'unsafe-inline'; " +
               "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com http://fonts.googleapis.com; " +
-              "connect-src 'self'" + (app.Environment.IsDevelopment() ? " ws://localhost:* wss://localhost:* http://localhost:*" : "") + "; " +
+              "connect-src 'self'" + (app.Environment.IsDevelopment()
+              ? " ws://localhost:* wss://localhost:* http://localhost:*"
+              : " wss: ws:") + "; " +
               "img-src 'self' data:; " +
               "font-src 'self' https://fonts.gstatic.com http://fonts.gstatic.com; " +
               "object-src 'none'; " +

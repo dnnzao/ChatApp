@@ -183,26 +183,39 @@ export class ChatApplication {
     /**
      * Switches to a room (without joining if not already joined)
      * @param {string} roomName 
-     * @returns {boolean}
+     * @returns {Promise<boolean>}
      */
     async switchToRoom(roomName) {
+        console.log(`🔄 switchToRoom called with: ${roomName}`);
+
         const validationService = this._getDependency('validationService');
 
         if (!validationService.isValidRoomName(roomName)) {
+            console.error(`❌ Invalid room name: ${roomName}`);
             return false;
         }
 
         if (!this.joinedRooms.has(roomName)) {
-            console.warn(`Cannot switch to room ${roomName}: not joined`);
+            console.warn(`⚠️ Cannot switch to room ${roomName}: not joined`);
             return false;
         }
 
         try {
-            // ✅ ADD THIS: Tell the server about the room switch
-            const connectionManager = this._getDependency('connectionManager');
-            await connectionManager.invoke("SwitchToRoom", roomName);
+            console.log(`📡 About to invoke SwitchToRoom for: ${roomName}`);
 
-            // Update current room
+            // Tell the server about the room switch
+            const connectionManager = this._getDependency('connectionManager');
+
+            // Add connection health check
+            if (!connectionManager.isHealthy()) {
+                console.error(`❌ Connection not healthy, cannot switch room`);
+                return false;
+            }
+
+            await connectionManager.invoke("SwitchToRoom", roomName);
+            console.log(`✅ Server call SwitchToRoom completed for: ${roomName}`);
+
+            // Update current room only AFTER successful server call
             this.currentRoom = roomName;
 
             const uiManager = this._getDependency('uiManager');
@@ -212,11 +225,12 @@ export class ChatApplication {
             uiManager.clearMessages();
             this._displayRoomMessages(roomName);
 
-            console.log(`Switched to room: ${roomName}`);
+            console.log(`✅ Successfully switched to room: ${roomName}`);
             return true;
 
         } catch (error) {
-            console.error(`Failed to switch to room ${roomName}:`, error);
+            console.error(`💥 Error in switchToRoom for ${roomName}:`, error);
+            console.error(`💥 Error stack:`, error.stack);
             this._handleError(error);
             return false;
         }

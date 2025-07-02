@@ -119,11 +119,13 @@ class AppBootstrapper {
      * @private
      */
     _addGlobalFunctions() {
+        const self = this; // Capture 'this' reference
+
         // Global function for joining rooms
         window.joinRoom = (roomName) => {
             console.log('Global joinRoom called:', roomName);
-            if (this.app && this.isReady) {
-                return this.app.joinRoom(roomName);
+            if (self.app && self.isReady) {
+                return self.app.joinRoom(roomName);
             } else {
                 console.error('Chat application not ready');
                 return Promise.resolve(false);
@@ -133,21 +135,30 @@ class AppBootstrapper {
         // Global function for leaving rooms
         window.leaveRoom = (roomName) => {
             console.log('Global leaveRoom called:', roomName);
-            if (this.app && this.isReady) {
-                return this.app.leaveRoom(roomName);
+            if (self.app && self.isReady) {
+                return self.app.leaveRoom(roomName);
             } else {
                 console.error('Chat application not ready');
                 return Promise.resolve(false);
             }
         };
 
-        // Global function for switching rooms from sidebar
-        window.switchToRoomFromSidebar = (roomName) => {
-            console.log('Global switchToRoomFromSidebar called:', roomName);
-            if (this.app && this.isReady) {
-                return this.app.switchToRoom(roomName);
+        // Global function for switching rooms from sidebar - FIX THE ASYNC ISSUE
+        window.switchToRoomFromSidebar = async (roomName) => {
+            console.log('🌐 Global switchToRoomFromSidebar called:', roomName);
+
+            if (self.app && self.isReady) {
+                try {
+                    console.log('🌐 About to call app.switchToRoom...');
+                    const result = await self.app.switchToRoom(roomName);
+                    console.log('🌐 Global switchToRoomFromSidebar result:', result);
+                    return result;
+                } catch (error) {
+                    console.error('🌐 Global switchToRoomFromSidebar error:', error);
+                    return false;
+                }
             } else {
-                console.error('Chat application not ready');
+                console.error('🌐 Chat application not ready');
                 return false;
             }
         };
@@ -155,8 +166,8 @@ class AppBootstrapper {
         // Global function for sending messages
         window.sendMessage = () => {
             console.log('Global sendMessage called');
-            if (this.app && this.isReady) {
-                return this.app.sendMessage();
+            if (self.app && self.isReady) {
+                return self.app.sendMessage();
             } else {
                 console.error('Chat application not ready');
                 return Promise.resolve(false);
