@@ -41,11 +41,17 @@ Dockerfile.prod
 docker-compose.override.yml
 docker-compose.prod.yml
 
-# Environment variables
+# Environment variables and Configuration
 .env
 .env.local
 .env.production
 appsettings.Development.json
+appsettings.Production.json
+
+# Custom log files
+*-log.txt
+log-file-*.txt
+development-cleanup-log.txt
 
 # OS generated files
 .DS_Store
